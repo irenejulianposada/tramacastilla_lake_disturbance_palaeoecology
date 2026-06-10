@@ -1,0 +1,633 @@
+---
+title: "Tramacastilla_disturbance_palaeoecology"
+author: "Irene Julián-Posada"
+date: "June 2026"
+output: pdf_document
+---
+This is the code used to obtain core data to perform statistical analyses included in file "tramacastilla_disturbance_palaeoecology_analyses" from Tramacastilla Lake sequence, included in Julián-Posada et al. (in prep).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+packages <- c("tidyverse","janitor","readxl", #for data manipulation
+              "tapas") #for charcoal analysis
+lapply(packages, library, character.only = TRUE)
+
+load("tramacastilla_disturbance_palaeoecology.RData")
+```
+
+# 1. Load ages, depths and sedaDNA data
+```{r}
+head(tram20_depth_ages) # ages and depths for core TRAM20-1B
+tram20_depth_ages_sed_rate <- tram20_depth_ages %>% # perform sedimentation rate
+  rename("age" = "median") %>%
+  dplyr::select(-depth) %>%
+  rename("depth" = "composite_depth") %>%
+  mutate(depth_diff = c(NA, diff(depth)),
+         age_diff = c(NA, diff(age)),
+         sed_rate = depth_diff/age_diff)
+
+head(RAI_plants) #sedaDNA plant data
+head(RAI_animals) #sedaDNA animal data
+
+RAI_animals_domestic <- RAI_animals %>% #only data from domestic animals
+  dplyr::select (age, Cattle, Sheep, Goat)
+
+```
+
+Apply binning approach to sedaDNA data in order to compare it with pollen and charcoal data
+```{r}
+bins_pollen <- tram20_pollen_holocene$age
+
+RAI_animals_domestic_binned <- RAI_animals_domestic %>%
+  mutate(binned_age = sapply(age, function(x) bins_pollen[which.min(abs(bins_pollen-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(Cattle = mean(Cattle, na.rm = TRUE),
+            Sheep = mean(Sheep, na.rm = TRUE),
+            Goat = mean(Goat, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+```
+
+# 2. Tramacastilla charcoal data
+## 2.1. Data upload
+```{r}
+head(charcoal.tram) #charcoal data from Tramacastilla (core TRAM20-1B) obtained using Win seedle Pro 2020a software 
+head(samples_names) #names of charcoal samples
+Tramacastilla_age <- tram20_depth_ages %>% #ages and depths for charcoal samples
+  select(SampleId, median, composite_depth) %>%
+  rename("age" = "median",
+         "depth" = "composite_depth") %>%
+  mutate(age = as.numeric(age),
+         depth = as.numeric(depth)) %>%
+  mutate(SampleId = str_replace_all(SampleId, "TRAM20-1B-", "TRAM-")) %>%
+  filter(SampleId %in% samples_names$SampleId) %>%
+  mutate_all(~replace(., is.na(.), 0))
+```
+There are 194 instead of 202 samples, as some of them have no data (no charcoal particles were found), so add them.
+```{r}
+charcoal.tram.202 <- full_join(charcoal.tram, samples_names, by = "SampleId") %>%
+  mutate(ImageType = ifelse(is.na(ImageType), "GLOBAL", ImageType)) #change ImageType to say GLOBAL for these new samples added
+
+length(unique(charcoal.tram.202$SampleId)) #make sure there are 202 samples
+```
+Now duplicate these new rows to obtain one row for GLOBAL and other for SEEDLE
+```{r}
+samples_no_data <- charcoal.tram.202 %>%
+  filter(is.na(ImageId)) %>%
+  mutate(ImageType = "SEEDLE")
+
+charcoal.tram.all <- rbind(charcoal.tram.202, samples_no_data) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+length(unique(charcoal.tram.all$SampleId)) #make sure there are 202 samples
+```
+Create 2 dataframes: one for global and another for seedle
+```{r}
+Gchar <- subset(charcoal.tram.all, ImageType=="GLOBAL")
+Schar <- charcoal.tram.all %>%
+  subset(ImageType=="SEEDLE") %>%
+  mutate(NPath.WLRatio = ifelse(NPath.WLRatio > 1, 1/NPath.WLRatio, NPath.WLRatio)) %>% #change values of WLRatio>1 and do 1/that value due to software mistake that has identified the width as the length
+  mutate(NofSeedles = as.numeric(NofSeedles)) %>%
+  mutate(DPI.ProjAreaObj = as.numeric(DPI.ProjAreaObj)) %>%
+  mutate(ObjectId = as.numeric(ObjectId))
+
+length(unique(Gchar$SampleId)) #make sure there are 202 samples for GLOBAL
+length(unique(Schar$SampleId))#make sure there are 202 samples for SEEDLE
+```
+
+## 2.2. Make a new data frame only with charcoal particles larger than 22500 µm
+First see the frequencies of area
+```{r}
+hist(Schar$DPI.ProjAreaObj, breaks = seq(0, 850000, 5000),
+     xlab = "Frequency of areas of charcoal particles",
+     main = paste("Area of charcoal particles"))
+summary(Schar$DPI.ProjAreaObj)
+```
+25% of the particles are below 13496 um2, which is a sieve diameter of 116 um, and mean 35713.
+Now filter particles so remove all that are below 110 um, that we assume is the noisy part of the signal --> remove those charcoal with an area <110 µm
+```{r}
+seedles <- charcoal.tram.all %>%
+  filter(ImageType == "SEEDLE" & DPI.ProjAreaObj > 12100) %>%
+  mutate(NPath.WLRatio = ifelse(NPath.WLRatio > 1, 1/NPath.WLRatio, NPath.WLRatio)) %>% #change values of WLRatio>1 and do 1/that value due to software mistake that has identified the width as the length
+  as.data.frame() %>%
+  mutate(DPI.ProjAreaObj = as.numeric(DPI.ProjAreaObj))
+```
+Now create another data frame with two columns, SampleId and CharCount, that is the number of particles that meet the requirements
+```{r}
+counting <- seedles %>%
+  group_by(SampleId) %>%
+  summarise(CharCount = n())
+```
+Another data frame with two columns, SampleId and sumCharArea, that is the sum of area of particles that meet the requirements
+```{r}
+totalarea <- seedles %>%
+  group_by(SampleId) %>%
+  summarise(sumCharArea = sum(DPI.ProjAreaObj, na.rm = TRUE))
+
+summary(totalarea$sumCharArea)
+hist(totalarea$sumCharArea, breaks = seq(0, 4500000, 50000),
+     main = paste("Frequency of total area of charcoal particles"),
+     xlab = "Sun of charcoal particles area")
+
+seedles.age <- seedles %>%
+  merge(Tramacastilla_age, by = "SampleId") %>%
+  group_by(SampleId) %>%
+  mutate(Color = ifelse(median(NPath.WLRatio) > 0.5, "green", "yellow")) %>%
+  distinct() %>%
+  ungroup() %>%
+  as.data.frame()
+```
+
+### 2.2.1. Create a data frame for plotting
+Create a file with one value per sample: count=length sampleID, W:L= mean W:L, area= sum ProjArea
+```{r}
+CharTotS_G.110 <- merge(counting, totalarea)
+CharTotS_G.110.age <- merge(CharTotS_G.110, Tramacastilla_age, by = "SampleId")
+```
+Check if area and charcoal number are correalted
+```{r}
+cor.test(CharTotS_G.110.age$sumCharArea,CharTotS_G.110.age$CharCount, method="spearman", exact = FALSE) 
+```
+87% of the data is correlated. Now check if that correlation is linnear or not
+```{r}
+summary(lm(CharTotS_G.110.age$sumCharArea~CharTotS_G.110.age$CharCount))
+```
+78% of data is linearly correlated
+Join these two data frames to have all good charcoal particles with CharCount column
+```{r}
+CharTotS_S.110 <- seedles %>%
+  group_by(SampleId) %>%
+  summarise(meanCharWL = mean(NPath.WLRatio, na.rm = TRUE),
+            medianCharWL = median(NPath.WLRatio, na.rm = TRUE))
+
+CharTotS.110 <- CharTotS_G.110 %>%
+  full_join(CharTotS_S.110, by = "SampleId") %>%
+  full_join(samples_names, by = "SampleId") %>% #add samples that are missing
+  mutate_all(~replace(., is.na(.), 0))
+```
+Add ages to order the samples
+```{r}
+CharTotS.110.age <- full_join(CharTotS.110, Tramacastilla_age, by = "SampleId")
+```
+
+### 2.2.2. Graphic representation
+```{r}
+seedles %>% #min, max, mean of WLRatio
+  ggplot(aes(x= 1, y = NPath.WLRatio)) +
+  geom_boxplot(outlier.shape = 20, width = 1) + 
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  scale_x_continuous(limits = c(0, 2), expand = c(0, 0)) +
+  theme_classic() +
+  ylab("W/L Ratio")
+```
+
+### 2.2.3. CharCount
+```{r}
+CharTotS.110.age %>%
+  ggplot(aes(x = age/1000, y = CharCount)) +
+  geom_line() +
+  xlab("Age (ka BP)") +
+  ylab("Number of charcoals") +
+  ggtitle("Burnt biomass") +
+  theme_classic() +
+  scale_x_reverse(breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), ""))
+```
+
+### 2.2.4. W/L Ratio
+```{r}
+W.L.ratio <- seedles.age %>%
+  group_by(age, depth) %>%
+  summarise(Woody = sum(NPath.WLRatio > 0.5),
+            Grasslands = sum(NPath.WLRatio < 0.5)) %>%
+  pivot_longer(cols = c("Woody", "Grasslands"), names_to = "fuel", values_to = "count")
+
+W.L.ratio %>%
+  ggplot (aes(x = age/1000, y = count, fill = fuel, color = fuel)) +
+  geom_area(alpha = 0.6) +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(x = "Age (ka BP)", y = "Number of particles", fill = "Type of fuel") +
+  theme_classic() +
+  scale_x_reverse(limits = c(max(W.L.ratio$age)/1000, min(W.L.ratio$age)/1000),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_fill_manual(values = c("Woody" = "darkgreen", "Grasslands" = "#FFD700")) +
+  scale_color_manual(values = c("Woody" = "darkgreen", "Grasslands" = "#FFD700"))
+```
+
+### 2.2.5. Charcoal number and area
+```{r}
+CC.110 <- CharTotS.110.age %>%
+  ggplot(aes(x = age/1000, y = CharCount)) +
+  geom_line() +
+  labs(x = "Age (ka BP)", y = "Charcoal number") +
+  scale_x_reverse(breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_y_continuous(breaks = seq(min(CharTotS.110.age$CharCount),max(CharTotS.110.age$CharCount), by = 20)) +
+  theme_classic() +
+  geom_smooth(method = "loess", se = FALSE)
+
+SCA.110 <- CharTotS.110.age %>%
+  ggplot(aes(x = age/1000, y = sumCharArea)) +
+  geom_line() +
+  labs(x = "Age (ka BP)", y = "Charcoal area (um2)") +
+  scale_x_reverse(breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_y_continuous(breaks = seq(min(CharTotS.110.age$sumCharArea),max(CharTotS.110.age$sumCharArea), by = 500000)) +
+  theme_classic() + 
+  geom_smooth(method = "loess", se = FALSE)
+
+plot_grid(CC.110,SCA.110,ncol = 1, nrow = 2, align="v")
+```
+
+## 2.3. Data preparation for tapas and CharAnalysis
+We need one file with the min, max, mean and median age, with the samples and also continuous depth (from 0 to 201)
+```{r}
+Tr <- Tramacastilla_age %>%
+  rename("median" = "age") %>%
+  mutate(SampleId = str_replace_all(SampleId, "TRAM-", "TRAM20-1B-")) %>%
+  left_join(tram20_depth_ages, by = c("SampleId", "median")) %>%
+  filter(SampleId != 'NA') %>%
+  dplyr::select(SampleId, min, max) %>%
+  mutate(cmTop = seq(0, 201, 1)) %>%
+  mutate(cmBot = seq(1, 202, 1)) %>%
+  relocate(cmBot, .after = SampleId) %>%
+  relocate(cmTop, .after = SampleId) %>%
+  rename("AgeTop" = min) %>%
+  rename("AgeBot" = max) %>%
+  mutate(across(everything(), ~ str_replace(., "^TRAM20-1B-", "TRAM-"))) %>%
+  merge(CharTotS.110.age, by = "SampleId") %>%
+  rename("char" = CharCount) %>%
+  rename("chararea" = sumCharArea) %>%
+  dplyr::select(cmTop, cmBot, AgeTop, AgeBot, char, chararea) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  arrange(cmTop)
+```
+
+We need another file with cmTop, cmBot, AgeTop, AgeBot, CharVol and CharCount (can be either counting or charcoal area)
+```{r}
+head (mass.density)#dataframe with volume and mass information of charcoal samples
+
+volume <- mass.density %>%
+  mutate(vol = Mass..g./Density..wet.sample...g.cm3.) %>%
+  dplyr::select(SampleId, vol)
+
+CharAnalysis.tram.110 <- Tramacastilla_age %>%
+  rename("median" = "age") %>%
+  mutate(SampleId = str_replace_all(SampleId, "TRAM-", "TRAM20-1B-")) %>%
+  left_join(tram20_depth_ages, by = c("SampleId", "median")) %>%
+  relocate(SampleId, .before = composite_depth) %>%
+  filter(SampleId != 'NA') %>%
+  dplyr::select(SampleId, min, max) %>%
+  mutate(cmTop = seq(0, 201, 1)) %>%
+  mutate(cmBot = seq(1, 202, 1)) %>%
+  relocate(cmBot, .after = SampleId) %>%
+  relocate(cmTop, .after = SampleId) %>%
+  rename("AgeTop" = min) %>%
+  rename("AgeBot" = max) %>%
+  mutate(across(everything(), ~ str_replace(., "^TRAM20-1B-", "TRAM-"))) %>%
+  merge(CharTotS.110.age, by = "SampleId") %>%
+  rename("char" = CharCount) %>%
+  rename("chararea" = sumCharArea) %>%
+  full_join(volume, by = "SampleId") %>%
+  dplyr::select(cmTop, cmBot, AgeTop, AgeBot, char, chararea, vol) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  arrange(cmTop)
+```
+
+## 2.4. Perform tapas
+
+### 2.4.1. Explore data
+
+Check data and treat it. Any gaps? continuous sampling? duplicates?
+```{r}
+Tr <- tapas::check_pretreat(Tr)
+Tr_i <- tapas::pretreatment_data(series = Tr)
+```
+
+Plot the depth-age relationship
+```{r}
+par(mfrow = c(1,1), mar = c(5,5,2,2))
+plot(Tr$AgeTop, Tr$cmTop, type = "l",
+     xlab = "Age (cal BP)",
+     ylab = "Depth (cmTop)")
+```
+
+Set x-axis and y-axis limits, and the direction of the axes and replot the depth-age relationship
+```{r}
+x_lim <- c(max(Tr$AgeTop), min(Tr$AgeTop))
+y_lim <- c(max(Tr$cmTop), min(Tr$cmTop))
+plot(Tr$AgeTop, Tr$cmTop, type = "l",
+     xlim = x_lim, ylim = y_lim,
+     xlab = "Age (cal BP; AgeTop)",
+     ylab = "Depth (cm; cmTop)")
+```
+
+Plot the raw data: charcoal counts against age
+```{r}
+plot(Tr$AgeTop, Tr$char, type = "h",
+     xlim = x_lim,
+     xlab = "Age (cal BP)",
+     ylab = "Charcoal counts (pieces/sample)")
+```
+
+Calculate and plot the sampling resolution (sample integration time) for the record (yr/sample)
+```{r}
+yr_smpl <- Tr$AgeBot - Tr$AgeTop
+plot(Tr$AgeTop, yr_smpl, type = "l",
+     xlab = "Age (cal BP)",
+     ylab = "Sample integration time\n(yr/sample)")
+```
+
+Check the distribution of sampling resolution values
+```{r}
+boxplot(yr_smpl, ylab = "Sample integration time\n(yr/sample)")
+summary(yr_smpl)
+```
+
+### 2.4.2. CharAnalysis-type with 'local threshold'
+
+Bin the data
+```{r}
+tr_i <- tapas::pretreatment_data(series = Tr, out = "accI",
+                                 first = 772, last = 11720,
+                                 yrInterp = 35)
+```
+
+Detrend the data
+```{r}
+tr_detr <- tapas::SeriesDetrend(tr_i, detr.type = "mov.median",
+                                smoothing.yr = 600)
+```
+
+Decompose noise & potential peaks
+```{r}
+tr_glob <- tapas::global_thresh(tr_detr, proxy = "charareaAR",
+                                thresh.value = 0.95)
+```
+
+### 2.4.3. Evaluate the results 
+Check SNI plot produced with previous function (the 2nd to last plots).
+Evaluate sensitivity to smoothing-window widths using the peak_detection() wrapper function
+```{r}
+tr_loc_prev <- tapas::peak_detection(series = Tr, proxy = "chararea",
+                                     first = 772, last = 11720,
+                                     yrInterp = 35,
+                                     thresh_type = "local",
+                                     detr_type = "rob.loess",
+                                     smoothing_yr = 600,
+                                     thresh_value = 0.95,
+                                     sens = T,
+                                     smoothing_yr_seq = c(500, 600, 700,
+                                                          800, 900, 1000))
+
+tr_loc <- tapas::local_thresh(tr_detr, proxy = "charareaAR",
+                              thresh.value = 0.95)
+```
+
+When and if you are happy with it, plot results & export data
+```{r}
+par(mfrow = c(2,1))
+tapas::Plot.Anomalies(tr_glob, plot.neg = FALSE, plot.x = TRUE)
+tapas::Plot_ReturnIntervals(tr_glob, plot.x = TRUE)
+tr_glob_exp <- tapas::tapas_export(tr_glob)
+```
+
+# 3. CHAR (charcoal particles · µm-² · yr-¹)
+
+## 3.1. Input data ####
+```{r}
+head(mass.density) #dataframe with volume and mass information of charcoal samples
+head(counting) #dataframe with sampleid and number of charcoal particles found in each sample
+head(CharTotS.110.age) #dataframe with sampleid and all charcoal metrics
+
+sed.rate.charcoal <- tram20_depth_ages_sed_rate %>% #dataframe with sedimentation rate of charcoal samples
+  mutate(SampleId = str_replace_all(SampleId, "TRAM20-1B-", "TRAM-")) %>% #change SampleId so it is the same than in CHAR 
+  mutate (across(c(depth_diff, age_diff, sed_rate), ~ ifelse(row_number() == 1 & is.na(.x), .x[2], .x))) %>% #we assume that sedimentation rate of first sample is the same than the second
+  filter(SampleId %in% mass.density$SampleId)
+```
+
+## 3.2. Calculate CHAR based on the total area of charcoal particles
+```{r}
+CHAR <- CharTotS.110.age %>%
+  select(SampleId, sumCharArea, age, depth) %>%
+  full_join(mass.density, by = "SampleId") %>%
+  select(-"Density..wet.sample...g.cm3.") %>%
+  rename("Mass" = "Mass..g.",
+         "Density" = "Density..dry.sample...g.cm3.") %>%
+  left_join(select(sed.rate.charcoal, SampleId, sed_rate), by = "SampleId") %>%
+  relocate("age", .after = "SampleId") %>%
+  mutate("CHAR.tram" = ((sumCharArea/Mass) * Density * sed_rate)) #µm²·cm-²·yr-¹
+```
+
+See correlation between CHAR and sedimentation rate, and other metrics
+```{r}
+cor(CHAR$sed_rate, CHAR$CHAR.tram, method = 'spearman') #cor = 0.28 -> low correlation
+
+summary(CHAR$CHAR.tram)
+sd(CHAR$CHAR.tram)
+```
+
+## 3.3. Figure CHAR
+```{r}
+pCHAR <- CHAR %>%
+  ggplot(aes(x = age/1000, y = CHAR.tram)) +
+  geom_col(width = 0.05) +
+  ylab("CHAR (charcoal area µm²·cm-²·yr-¹)") +
+  xlab("Age (ka BP)") +
+  scale_x_reverse(limits = c(max(CHAR$age)/1000, min(CHAR$age)/1000),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  theme_classic()
+```
+
+# 4. Tramacastilla pollen
+```{r, eval = FALSE}
+head(tram20_pollen_holocene) #Pollen counts throughout the Holocene
+```
+
+See some metrics about pollen grains and pollen types counted 
+```{r}
+summary(tram20_pollen$`Terrestrial pollen sum`)
+sd(tram20_pollen$`Terrestrial pollen sum`)
+summary(tram20_pollen$`No of taxa`)
+sd(tram20_pollen$`No of taxa`)
+```
+
+Plot pollen-type richness
+```{r}
+tram20_pollen_holocene %>%
+  ggplot(aes(x = age/1000, y = `No of taxa`)) +
+  geom_point() +
+  scale_x_reverse(limits = c(12, 0.863),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  theme_classic() +
+  geom_smooth(method = "loess") +
+  labs(x = "Age (ka BP)",
+       y = "Number of pollen types")
+```
+
+Import pollen groups
+```{r}
+head(pollen_group)
+length(unique(pollen_group$pollen_group))
+length(unique(pollen_group$pollen_group_general))
+length(unique(pollen_group$pollen_group_discussion))
+```
+
+## 4.1. Pollen Accumulation Rate (PAR)
+
+Data input
+```{r}
+head(tram20_density_pollen) #dataframe with density of pollen samples
+head(pollen_samples_mass) #dataframe with mass of pollen samples
+
+sed.rate.pollen <- tram20_depth_ages_sed_rate %>% #dataframe with sedimentation rate
+  mutate (across(c(depth_diff, age_diff, sed_rate), ~ ifelse(row_number() == 1 & is.na(.x), .x[2], .x))) %>% #we assume that sedimentation rate of first sample is the same than the second
+  filter(SampleId %in% tram20_pollen$SampleId)
+```
+
+Compute PAR
+```{r}
+tram20_PAR <- tram20_pollen_holocene %>%
+  dplyr::select(-c(`Evergreen trees`:Trees, Shrubs, Herbs, Hygrophytes, Hydrophytes:Spores, `Charcoal <150`)) %>%
+  left_join(tram20_density_pollen, by = "SampleId") %>%
+  left_join(pollen_samples_mass, by = "SampleId") %>%
+  left_join(dplyr::select(sed.rate.pollen, SampleId, sed_rate), by = "SampleId") %>%
+  mutate(age = as.numeric(age)) %>%
+  mutate(across(!c(SampleId, depth, age, `Lycopodium`, Density, Mass, sed_rate),
+                ~ (. / ((`Lycopodium` * Mass)/41696)) * Density * sed_rate,
+                .names = "PAR_{.col}")) %>% #41696 Lycopodium spores in each sample
+  dplyr::select(c(depth, age, PAR_Abies:`PAR_Undetermined`)) %>%
+  rename_with(~ gsub("^PAR_", "", .x)) %>% #remove prefix
+  dplyr::select(where(~ sum(., na.rm = TRUE) > 0)) #only taxons that appear in these samples
+```
+
+Sum of terrestrial PAR in each sample to see relationship between terrestrial vegetation and CHAR
+```{r}
+tram20_PAR_sum <- tram20_PAR %>%
+  mutate(sum = rowSums(across(Abies:Viola)))
+
+summary(tram20_PAR_sum$sum)
+sd(tram20_PAR_sum$sum)
+
+tram20_PAR_sum %>% ggplot(aes(x = age/1000, y=sum)) +
+  geom_col() +
+  scale_x_reverse(breaks = seq(0.5, 25, by = 0.5),
+                  labels = ifelse(seq(0.5, 25, by = 0.5) %% 1 == 0, as.character(seq(0.5, 25, by = 0.5)), "")) +
+  theme_classic() +
+  labs(y = "Sum of PAR",
+       x = "Age (ka BP)")
+
+tram20_PAR_CHAR <- tram20_PAR_sum %>%
+  left_join(tram20_pollen_holocene %>% select (SampleId, age), by = "age") %>%
+  left_join(CHAR %>% select(age, CHAR.tram), by = "age") %>%
+  na.omit()
+
+#check if PAR and CHAR are correalted
+cor.test(tram20_PAR_CHAR$sum, tram20_PAR_CHAR$CHAR.tram, method="spearman", exact = FALSE) #34% of the data is correlated
+#check if that correlation is linnear or not
+summary(lm(tram20_PAR_CHAR$sum~tram20_PAR_CHAR$CHAR.tram)) #6% is the amount of data linnearly correlated
+
+tram20_PAR_CHAR %>%
+  ggplot(aes(x = CHAR.tram, y = sum)) + 
+  geom_point(shape = 21, fill = "gray50", color = "black", size = 4, alpha = 0.5) +
+  geom_smooth(method = "lm", col = "red") +
+  xlab("CHAR (particles/cm2 yr)") + 
+  ylab("total PAR (pollen grains/cm2 yr)") +
+  ggtitle("PAR vs. CHAR") +
+  theme(text = element_text(size = 12),
+        plot.title = element_text(size  =  16))
+```
+
+### 4.1.1. PAR grouped
+```{r}
+tram20_PAR_groups <- tram20_PAR %>%
+  pivot_longer(cols = Abies:Undetermined, names_to = "Taxon", values_to = "PAR_value") %>% #long format
+  left_join(pollen_group, by = "Taxon") %>% #Include pollen groups
+  group_by(depth, age, pollen_group_general) %>%
+  summarise(tram20_PAR_sum = sum(PAR_value, na.rm = TRUE)) %>% #calculate PAR sum for each group
+  pivot_wider(names_from = pollen_group_general, values_from = tram20_PAR_sum, values_fill = 0) %>% #back to wide format
+  dplyr::select(age, depth, Abies, Pinus, Juniperus, Fagus, Betula, Corylus, `Deciduous Quercus`, Tilia, Ulmus,
+         `Evergreen trees`, `Other deciduous trees`, Ephedra, Shrubs, Poaceae, `Cerealia type`, Apiaceae, Artemisia,
+         Cichorioideae, Caryophyllaceae, Chenopodiaceae, Helianthemum, Plantago, Ranunculaceae, Thalictrum,
+         Filipendula, Potentilla, Sanguisorba, Rumex, Scrophulariaceae, Urtica, Urticaceae, `Other herbs`,
+         Hygrophytes, Hydrophytes, Undetermined) %>% #keep order
+  as.data.frame()
+```
+
+## 4.2. PAR groups for models
+```{r}
+tram20_PAR_groups_discussion <- tram20_PAR %>%
+  pivot_longer(cols = Abies:Undetermined, names_to = "Taxon", values_to = "PAR_value") %>% #long format
+  left_join(pollen_group, by = "Taxon") %>% #Include pollen groups
+  group_by(depth, age, pollen_group_discussion) %>%
+  summarise(PAR_sum = sum(PAR_value, na.rm = TRUE)) %>% #calculate PAR sum for each group
+  pivot_wider(names_from = pollen_group_discussion, values_from = PAR_sum, values_fill = 0) %>% #back to wide format
+  dplyr::select(age, depth, Abies, Pinus, Juniperus, Fagus, Betula, Corylus, `Deciduous Quercus`, Tilia, Ulmus,
+         `Evergreen trees`, `Other deciduous trees`, Shrubs, Poaceae, `Steppe taxa`, `Other herbs`, `Anthropogenic taxa`,
+         Hygrophytes, Hydrophytes, Undetermined) %>% #keep order and exclude Ferns and Selaginella
+  as.data.frame()
+
+tram20_PAR_groups_communities <- tram20_PAR %>%
+  pivot_longer(cols = Abies:Undetermined, names_to = "Taxon", values_to = "PAR_value") %>% #long format
+  left_join(pollen_group, by = "Taxon") %>% #Include pollen groups
+  group_by(depth, age, Community_2) %>%
+  summarise(PAR_sum = sum(PAR_value, na.rm = TRUE)) %>% #calculate PAR sum for each group
+  filter(Community_2 != "NA") %>% # exclude NAs
+  pivot_wider(names_from = Community_2, values_from = PAR_sum, values_fill = 0) %>% #back to wide format
+  as.data.frame()
+```
+
+# 5. Fungal spores
+
+```{r}
+head(tram20_spores)
+
+#see some metrics
+summary(tram20_spores$total_spores)
+sd(tram20_spores$total_spores)
+summary(tram20_spores$Noftaxa)
+sd(tram20_spores$Noftaxa)
+```
+
+## 5.1. Compute Spore Accumulation Rate (SAR)
+```{r}
+tram20_SAR <- tram20_spores %>%
+  left_join(tram20_density_pollen, by = "SampleId") %>%
+  left_join(pollen_samples_mass, by = "SampleId") %>%
+  left_join(dplyr::select(sed.rate.pollen, SampleId, sed_rate), by = "SampleId") %>%
+  mutate(age = as.numeric(age)) %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+  mutate(across(!c(SampleId, depth, age, `Lycopodium clavatum`, Density, Mass, sed_rate),
+                ~ (. / ((`Lycopodium clavatum` * Mass)/41696)) * Density * sed_rate,
+                .names = "PAR_{.col}")) %>% #41696 lycopodium spores  in each sample
+  dplyr::select(c(depth, age, `PAR_Apiosordaria type`:`PAR_Facultative coprophilous`)) %>%
+  rename_with(~ gsub("^PAR_", "", .x)) %>% #remove prefix
+  mutate(total_SAR = rowSums(across(`Apiosordaria type`:Glomus)))
+
+summary(tram20_SAR$total_SAR)
+sd(tram20_SAR$total_SAR)
+```
+
+Import spore groups
+```{r}
+head(spores_groups)
+```
+
+Obtain final data set
+```{r}
+tram20_SAR_long <- tram20_SAR %>%
+  pivot_longer(cols = `Apiosordaria type`:total_SAR,
+               names_to = "Taxon", values_to = "SAR") %>%
+  left_join(spores_groups, by = "Taxon") %>%
+  arrange(age, `Spore type`)
+
+tram20_SAR_coprophilous <- tram20_SAR_long %>%
+  filter(`Spore type` == "Facultative coprophilous" |
+           `Spore type` == "Obligate coprophilous") %>%
+  dplyr::select(-`Spore type`) %>%
+  pivot_wider(names_from = Taxon, values_from = SAR)
+```
