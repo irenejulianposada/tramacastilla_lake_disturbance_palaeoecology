@@ -1,0 +1,400 @@
+---
+title: "Tramacastilla_disturbance_palaeoecology_figures"
+author: "Irene Julián-Posada"
+date: "June 2026"
+output: pdf_document
+---
+This is the code used to obtain figures and tables included in Julián-Posada et al. (in prep).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+packages <- c("readr", "tidyverse", "patchwork", "lavaan", #for data manipulation and visualisation
+              "semPlot", #for structural equation modelling visualisation
+              "rioja") #spore and pollen diagrams
+lapply(packages, library, character.only = TRUE)
+
+load("tramacastilla_disturbance_palaeoecology.RData")
+```
+
+# 1. Table 1 - Results summary
+
+Pollen data
+```{r}
+pollen_summary <- data.frame(
+  Proxy = "Pollen",
+  Metric = "Number of pollen grains per sample",
+  Min = min(tram20_pollen_holocene$`Terrestrial pollen sum`),
+  Max = max(tram20_pollen_holocene$`Terrestrial pollen sum`),
+  Mean = round(mean(tram20_pollen_holocene$`Terrestrial pollen sum`), 2),
+  SD = round(sd(tram20_pollen_holocene$`Terrestrial pollen sum`), 2)) %>%
+  rbind(data.frame(
+    Proxy = "Pollen",
+    Metric = "Pollen richness: number of pollen types per sample",
+    Min = min(tram20_pollen_holocene$`No of taxa`),
+    Max = max(tram20_pollen_holocene$`No of taxa`),
+    Mean = round(mean(tram20_pollen_holocene$`No of taxa`), 2),
+    SD = round(sd(tram20_pollen_holocene$`No of taxa`), 2))) %>%
+  rbind(data.frame(
+    Proxy = "Pollen",
+    Metric = "PAR (number of grains·cm-2·yr-1)",
+    Min = round(min(tram20_PAR_sum$sum), 2),
+    Max = round(max(tram20_PAR_sum$sum), 2),
+    Mean = round(mean(tram20_PAR_sum$sum), 2),
+    SD = round(sd(tram20_PAR_sum$sum), 2)))
+```
+
+Fungal spores' data
+```{r}
+fungal_spores_summary <- data.frame(
+  Proxy = "Fungal spores'",
+  Metric = "Number of fungal spores per sample",
+  Min = min(tram20_spores$total_spores),
+  Max = max(tram20_spores$total_spores),
+  Mean = round(mean(tram20_spores$total_spores), 2),
+  SD = round(sd(tram20_spores$total_spores), 2)) %>%
+  rbind(data.frame(
+    Proxy = "Fungal spores'",
+    Metric = "Fungal richness: number of fungal types per sample",
+    Min = min(tram20_spores$Noftaxa),
+    Max = max(tram20_spores$Noftaxa),
+    Mean = round(mean(tram20_spores$Noftaxa), 2),
+    SD = round(sd(tram20_spores$Noftaxa), 2))) %>%
+  rbind(data.frame(
+    Proxy = "Fungal spores'",
+    Metric = "SAR (number of spores·cm-2·yr-1)",
+    Min = round(min(tram20_SAR$total_SAR), 2),
+    Max = round(max(tram20_SAR$total_SAR), 2),
+    Mean = round(mean(tram20_SAR$total_SAR), 2),
+    SD = round(sd(tram20_SAR$total_SAR), 2)))
+```
+
+Charcoal data
+```{r}
+charcoal_summary <- data.frame(
+  Proxy = "Charcoal",
+  Metric = "Number of charcoal particles per sample",
+  Min = min(CharTotS.110.age$CharCount),
+  Max = max(CharTotS.110.age$CharCount),
+  Mean = round(mean(CharTotS.110.age$CharCount), 2),
+  SD = round(sd(CharTotS.110.age$CharCount), 2))  %>%
+  rbind(data.frame(
+    Proxy = "Charcoal",
+    Metric = "Charcoal area per sample (mm2)",
+    Min = min(CHAR$sumCharArea)/1e6,
+    Max = round(max(CHAR$sumCharArea)/1e6, 2),
+    Mean = round(mean(CHAR$sumCharArea/1e6), 2),
+    SD = round(sd(CHAR$sumCharArea/1e6), 2))) %>%
+  rbind (data.frame(
+    Proxy = "Charcoal",
+    Metric = "Width to length (W/L) ratio",
+    Min = round(min(seedles$NPath.WLRatio), 2),
+    Max = round(max(seedles$NPath.WLRatio), 2),
+    Mean = round(mean(seedles$NPath.WLRatio), 2),
+    SD = round(sd(seedles$NPath.WLRatio), 2))) %>%
+  rbind (data.frame(
+    Proxy = "Charcoal",
+    Metric = "CHAR (µm2·cm-2·yr-1)",
+    Min = min(CHAR$CHAR.tram),
+    Max = max(CHAR$CHAR.tram),
+    Mean = round(mean(CHAR$CHAR.tram), 2),
+    SD = round(sd(CHAR$CHAR.tram), 2)))
+```
+
+SedaDNA data
+```{r}
+RAI_plants_sum <- RAI_plants %>%
+  mutate(total_RAI_plants = rowSums(across(`Abies alba`:Ziziphora))) %>%
+  mutate(richness_plants = rowSums(select(., `Abies alba`:Ziziphora) > 0, na.rm = TRUE)) %>%
+  select(total_RAI_plants, richness_plants)
+
+RAI_animals_sum <- RAI_animals %>%
+  mutate(total_RAI_animals = rowSums(across(`Bos taurus`:`Nyctalus noctula`))) %>%
+  mutate(richness_animals = rowSums(select(., `Bos taurus`:`Nyctalus noctula`) > 0, na.rm = TRUE)) %>%
+  select(total_RAI_animals, richness_animals)
+
+sedaDNA_summary <- data.frame(
+  Proxy = "sedaDNA",
+  Metric = "Plant taxa per sample",
+  Min = min(RAI_plants_sum$richness_plants),
+  Max = max(RAI_plants_sum$richness_plants),
+  Mean = round(mean(RAI_plants_sum$richness_plants), 2),
+  SD = round(sd(RAI_plants_sum$richness_plants), 2)) %>%
+  rbind (data.frame(
+    Proxy = "sedaDNA",
+    Metric = "Animal taxa per sample",
+    Min = min(RAI_animals_sum$richness_animals),
+    Max = max(RAI_animals_sum$richness_animals),
+    Mean = round(mean(RAI_animals_sum$richness_animals), 2),
+    SD = round(sd(RAI_animals_sum$richness_animals), 2))) %>%
+  rbind (data.frame(
+    Proxy = "sedaDNA",
+    Metric = "Plant RAI",
+    Min = round(min(RAI_plants_sum$total_RAI_plants), 2),
+    Max = round(max(RAI_plants_sum$total_RAI_plants), 2),
+    Mean = round(mean(RAI_plants_sum$total_RAI_plants), 2),
+    SD = round(sd(RAI_plants_sum$total_RAI_plants), 2))) %>%
+  rbind (data.frame(
+    Proxy = "sedaDNA",
+    Metric = "Animal RAI",
+    Min = round(min(RAI_animals_sum$total_RAI_animals), 2),
+    Max = round(max(RAI_animals_sum$total_RAI_animals), 2),
+    Mean = round(mean(RAI_animals_sum$total_RAI_animals), 2),
+    SD = round(sd(RAI_animals_sum$total_RAI_animals), 2)))
+```
+
+Create table 1
+```{r}
+table1 <- rbind(pollen_summary, fungal_spores_summary, charcoal_summary, sedaDNA_summary)
+table1
+```
+
+# 2. Figure 2 - sedimentation rate + spores + animals
+
+Include all data in one dataframe
+```{r}
+sed.rate.SAR.diagram <- tram20_SAR %>%
+  dplyr::select(-c(depth, total_SAR)) %>%
+  left_join(tram20_depth_ages_sed_rate %>%
+              dplyr::select(age, sed_rate), by = "age") %>%
+  relocate(sed_rate, .after = "age") %>%
+  relocate(`Obligate coprophilous`, .after = "Facultative coprophilous") %>%
+  full_join(RAI_animals_domestic, by = "age") %>%
+  arrange(age) %>%
+  filter(age<12000) %>%
+  mutate(sed_rate = sed_rate*1000, # CAREFUL WITH THIS TRANSFORMATION -- just for visualisation
+         Cattle = Cattle*100, # CAREFUL WITH THIS TRANSFORMATION -- just for visualisation
+         Sheep = Sheep*100, # CAREFUL WITH THIS TRANSFORMATION -- just for visualisation
+         Goat = Goat*100) # CAREFUL WITH THIS TRANSFORMATION -- just for visualisation
+```
+
+Configuration of styles
+```{r}
+ex.spores <- c(FALSE, rep(TRUE, times = 28), rep(FALSE, times = 3))
+c.sed.rate.line <- c("black", rep(NA, times = 31))
+c.spores.bar <- c(NA, rep("black", times = 28), NA, NA, NA)
+c.animals.bar <- c(rep(NA, times = 29), rep("#E57E7E", times = 3))
+c.spores.poly <- c(NA, rep("#458B74", times = 14), rep("#993F00", times = 4),
+                   rep("orange", times = 8), rep("#458B74", times = 1), rep("#993F00", times = 1), NA, NA, NA)
+```
+
+Create figure
+```{r}
+p.sedrate.sar <- strat.plot(sed.rate.SAR.diagram %>%
+                              dplyr::select(-age) %>%
+                              rename("sedimentation \n rate (cm/yrs)" = "sed_rate"),
+                            yvar = sed.rate.SAR.diagram %>%
+                              dplyr::select(age)/1000,
+                            ylabel = "Age (ka BP)", y.tks= seq(1, 12, 1), y.rev=TRUE,
+                            plot.line=TRUE, plot.poly=FALSE, plot.bar=FALSE, col.line=c.sed.rate.line,
+                            scale.percent=TRUE, xSpace=0.009, x.pc.inc=10, x.pc.lab=TRUE, x.pc.omit0=TRUE, las=2, srt.xlabel=70, exag = FALSE)
+p.sedrate.sar <- strat.plot(sed.rate.SAR.diagram %>%
+                              dplyr::select(-age),
+                            yvar = sed.rate.SAR.diagram %>%
+                              dplyr::select(age)/1000, y.rev=TRUE,
+                            plot.line=TRUE, plot.poly=TRUE, plot.bar=TRUE, col.line=c.spores.bar, col.bar=c.spores.bar, col.poly=c.spores.poly,
+                            scale.percent=TRUE, xSpace=0.009, x.pc.inc=10, x.pc.lab=FALSE, x.pc.omit0=TRUE, las=2, exag = ex.spores, col.exag = "auto",
+                            x.axis=FALSE, x.names = NA, y.pc.lab = FALSE, add=TRUE)
+p.sedrate.sar <- strat.plot(sed.rate.SAR.diagram %>%
+                              dplyr::select(-age),
+                            yvar = sed.rate.SAR.diagram %>%
+                              dplyr::select(age)/1000, y.rev=TRUE,
+                            plot.line=FALSE, plot.poly=FALSE, plot.bar=TRUE, col.bar= c.animals.bar, lwd.bar = 2,
+                            scale.percent=TRUE, xSpace=0.009, x.pc.inc=10, x.pc.lab=FALSE, x.pc.omit0=TRUE, las=2,
+                            x.axis=FALSE, x.names = NA, y.pc.lab = FALSE, add=TRUE) #save pdf A4 and MODIFY SCALES
+```
+
+# 3. Figure 3 - Changes in disturbance regimes with RoC, cpt and fire events
+
+Figure 3a - Fire events
+```{r}
+p.fig3.1 <- tr_glob_exp %>%
+  ggplot(aes(x = age_top_i/1000, y = acc_i)) +
+  geom_col(width = 0.01, fill = "grey40") +
+  geom_smooth(method = "loess", span = 0.15, se = FALSE, color = "red", size = 0.5) +
+  geom_smooth(method = "loess", span = 0.2, se = FALSE, color = "grey", size = 0.5) +
+  geom_point(data = tr_glob_exp %>% filter(peaks_pos_sig > 0),
+             aes(x = age_top_i/1000, y = peaks_pos_sig*30000),
+             shape = 3, size = 2, color = "red") +
+  geom_col(data = tr_glob_exp %>% filter(peaks_pos_sig > 0),
+           aes(x = age_top_i/1000, y = peaks_pos_sig*30000),
+           fill = "red", alpha = 0.3, width = 0.02) +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_y_continuous(breaks = c(0, 10000, 20000),
+                     labels = c("0", "1e+4", "2e+4")) +
+  theme_classic() +
+  ylab("") +
+  theme(axis.title.x = element_blank(),
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        legend.text = element_text(size = 11))
+```
+
+Figure 3b - W/L ratio
+```{r}
+p.fig3.2 <- W.L.ratio %>%
+  rename("Type of fuel" = "fuel") %>%
+  ggplot(aes(x = age/1000, y = count, fill = `Type of fuel`, color = `Type of fuel`)) +
+  geom_area(alpha = 0.6, position = "stack") +
+  geom_smooth(method = "loess", se = FALSE, aes(color = `Type of fuel`), linewidth = 1, alpha = 0.8) +
+  scale_y_continuous(trans = "sqrt",  # transformation with squared root
+                     breaks = c(0, 5, 20, 50)) +
+  labs(y = "") +
+  theme_classic() +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_fill_manual(values = c("Woody" = "darkgreen", "Grasslands" = "#FFD700")) +
+  scale_color_manual(values = c("Woody" = "darkgreen", "Grasslands" = "#FFD700")) +
+  theme(axis.title.x = element_blank(),
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        legend.text = element_text(size = 11)) +
+  annotate("text", x = 2, y = 120, label = "peak = 59", vjust = -1, color = "red")
+```
+
+Figure 3c - CHAR with changepoints
+```{r}
+p.fig3.3 <- tram20_CHAR_cpt %>%
+  ggplot(aes(x = age/1000, y = CHAR.tram)) +
+  geom_line() +
+  geom_vline(xintercept = changepoint_ages_CHAR/1000, color = "red", linetype = "dashed") +
+  theme_classic() +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_y_continuous(breaks = c(0, 10000, 20000, 30000),
+                     labels = c("0", "1e+4", "2e+4", "3e+4")) +
+  ylab("CHAR (µm2·cm-2·yr-1)") +
+  theme(axis.title.x = element_blank())
+```
+
+Figure 3d - Rate of Change of SAR
+```{r}
+p.fig3.4 <- scenario_4_SAR_peak %>%
+  ggplot(aes(x = Age/1000))+
+  theme_classic() +
+  geom_ribbon(aes(ymin = ROC_dw, ymax = ROC_up), fill = "grey") +
+  geom_line(aes(y = ROC)) + 
+  geom_point(size = 3, aes(y = ROC_peak), shape = 21, fill = "green") +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  ylab("RoC of SAR") +
+  theme(axis.title.x = element_blank())
+```
+
+Figure 3e - Rate of Change of PAR
+```{r}
+p.fig3.5 <- scenario_4_PAR_peak %>%
+  ggplot(aes(x = Age/1000))+
+  theme_classic() +
+  geom_ribbon(aes(ymin = ROC_dw, ymax = ROC_up), fill = "grey") +
+  geom_line(aes(y = ROC)) + 
+  geom_point(size = 3, aes(y = ROC_peak), shape = 21, fill = "green") +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  labs(y = "RoC of PAR") +
+  theme(axis.title.x = element_blank())
+```
+
+Figure 3f - Rate of Change of RAI
+```{r}
+p.fig3.6 <- scenario_4_RAI_peak %>%
+  ggplot(aes(x = Age/1000))+
+  theme_classic() +
+  geom_ribbon(aes(ymin = ROC_dw, ymax = ROC_up), fill = "grey") +
+  geom_line(aes(y = ROC)) + 
+  geom_point(size = 3, aes(y = ROC_peak), shape = 21, fill = "green") +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  labs(x = "Age (ka BP)", y = "RoC of RAI")
+```
+
+Create figure 3
+```{r}
+p.fig3.1/p.fig3.2/p.fig3.3/p.fig3.4/p.fig3.5/p.fig3.6 #save A5
+```
+
+# 4. Table 2 - Generalized Additive Models (GAMs)
+``` {r}
+extract <- function(summary_gam, var_name, predictor_name) {
+  coef <- summary_gam$p.table[2,]
+  data.frame(Variable=var_name, Predictor=predictor_name, 
+             Estimate=coef[1], `Standard error`=coef[2], `t-value`=coef[3], 
+             `p-value`=ifelse(coef[4]<0.001,"< 0.001 **",paste(round(coef[4],3),"**")),
+             Deviance=paste0(round(summary_gam$dev.expl*100),"%"))
+}
+
+rbind(
+  extract(summary_gam1, "Rate of Change sedaDNA", "Temperature"),
+  extract(summary_gam2, "Rate of Change sedaDNA", "Cattle"),
+  extract(summary_gam3, "Rate of Change sedaDNA", "Sheep"),
+  extract(summary_gam4, "Rate of Change sedaDNA", "Obligate coprophilous fungi"),
+  extract(summary_gam5, "Rate of Change sedaDNA", "Fire"),
+  extract(summary_gam1_PAR, "Rate of Change pollen", "Temperature"),
+  extract(summary_gam2_PAR, "Rate of Change pollen", "Cattle"),
+  extract(summary_gam3_PAR, "Rate of Change pollen", "Sheep"),
+  extract(summary_gam4_PAR, "Rate of Change pollen", "Obligate coprophilous fungi"),
+  extract(summary_gam5_PAR, "Rate of Change pollen", "Fire"))
+```
+
+# 5. Table 3 - Parameters of Structural Equation Model (SEM)
+``` {r}
+parameterEstimates(fit_no_normal_8, standardized = TRUE) %>%
+  filter(op == "~") %>%
+  dplyr::select(lhs, rhs, est, se, z, std.all, pvalue) %>%
+  rename("Response" = "lhs",
+         "Predictor" = "rhs",
+         "Estimate" = "est",
+         "Standard error" = "se",
+         "z-value" = "z",
+         "Standardised estimate" = "std.all",
+         "p-value" = "pvalue") 
+```
+
+# 6. Figure 4 - Structural Equation Model (SEM)
+``` {r}
+semPaths(fit_no_normal_8,
+         what = "std",
+         whatLabels = "std",
+         style = "lisrel",
+         layout = "tree",
+         nodeLabels = c("Cattle", "Sheep", "Obligate coprophilous fungi", "Abies-Fagus",
+                        "Temperate forests", "Evenness", "Grasslands", "Pinewoods", "Mediterranean", "d13C Mendukilo", "CHAR",
+                        "Herbivory"),
+         edge.label.cex = 1.2,
+         sizeMan = 8,
+         sizeLat = 8,
+         label.cex = 2,
+         mar = c(8, 1, 6, 1))
+```
+
+# 7. Figure 5 - Cross-correlations
+
+Cross correlations before 6.5 ka BP
+``` {r}
+fig_cross_before <- p.richness.ccf_before/p.evenness.ccf_before/p.poaceae.ccf_before/
+  p.pinus.ccf_before/p.betula.ccf_before/p.corylus.ccf_before/p.decquercus.ccf_before +
+  plot_layout(ncol = 1, nrow = 9) +
+  theme(plot.margin = margin(0, 0, 0, 0, "pt")) +
+  plot_annotation(title = "Before 6.5 ka BP")
+```
+
+Cross correlations after 6.5 ka BP
+``` {r}
+fig_cross_after <- p.richness.ccf_after/p.evenness.ccf_after/ p.poaceae.ccf_after/p.pinus.ccf_after/
+  p.betula.ccf_after/p.corylus.ccf_after/p.decquercus.ccf_after/p.abies.ccf_after/p.fagus.ccf_after +
+  plot_layout(ncol = 1, nrow = 9) +
+  theme(plot.margin = margin(0, 0, 0, 0, "pt")) +
+  plot_annotation(title = "After 6.5 ka BP")
+```
+
+Cross correlations before and after 6.5 ka BP
+``` {r}
+fig_cross_before|fig_cross_after +
+  plot_layout(guides = "collect")
+```

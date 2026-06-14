@@ -7,12 +7,13 @@ output: pdf_document
 This is the code used to obtain core data to perform statistical analyses included in file "tramacastilla_disturbance_palaeoecology_analyses" from Tramacastilla Lake sequence, included in Julián-Posada et al. (in prep).
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
 packages <- c("tidyverse","janitor","readxl", #for data manipulation
+              "cowplot", #for data visualisation
               "tapas") #for charcoal analysis
 lapply(packages, library, character.only = TRUE)
 
-load("tramacastilla_disturbance_palaeoecology.RData")
+load("tramacastilla_disturbance_palaeoecology_core_data.RData")
 ```
 
 # 1. Load ages, depths and sedaDNA data
@@ -30,6 +31,9 @@ head(RAI_plants) #sedaDNA plant data
 head(RAI_animals) #sedaDNA animal data
 
 RAI_animals_domestic <- RAI_animals %>% #only data from domestic animals
+  rename("Cattle" = `Bos taurus`,
+         "Sheep" = `Ovis aries`,
+         "Goat" = `Capra hircus`) %>%
   dplyr::select (age, Cattle, Sheep, Goat)
 
 ```
@@ -424,9 +428,6 @@ CHAR <- CharTotS.110.age %>%
 See correlation between CHAR and sedimentation rate, and other metrics
 ```{r}
 cor(CHAR$sed_rate, CHAR$CHAR.tram, method = 'spearman') #cor = 0.28 -> low correlation
-
-summary(CHAR$CHAR.tram)
-sd(CHAR$CHAR.tram)
 ```
 
 ## 3.3. Figure CHAR
@@ -445,14 +446,6 @@ pCHAR <- CHAR %>%
 # 4. Tramacastilla pollen
 ```{r, eval = FALSE}
 head(tram20_pollen_holocene) #Pollen counts throughout the Holocene
-```
-
-See some metrics about pollen grains and pollen types counted 
-```{r}
-summary(tram20_pollen$`Terrestrial pollen sum`)
-sd(tram20_pollen$`Terrestrial pollen sum`)
-summary(tram20_pollen$`No of taxa`)
-sd(tram20_pollen$`No of taxa`)
 ```
 
 Plot pollen-type richness
@@ -486,7 +479,7 @@ head(pollen_samples_mass) #dataframe with mass of pollen samples
 
 sed.rate.pollen <- tram20_depth_ages_sed_rate %>% #dataframe with sedimentation rate
   mutate (across(c(depth_diff, age_diff, sed_rate), ~ ifelse(row_number() == 1 & is.na(.x), .x[2], .x))) %>% #we assume that sedimentation rate of first sample is the same than the second
-  filter(SampleId %in% tram20_pollen$SampleId)
+  filter(SampleId %in% tram20_pollen_holocene$SampleId)
 ```
 
 Compute PAR
@@ -509,9 +502,6 @@ Sum of terrestrial PAR in each sample to see relationship between terrestrial ve
 ```{r}
 tram20_PAR_sum <- tram20_PAR %>%
   mutate(sum = rowSums(across(Abies:Viola)))
-
-summary(tram20_PAR_sum$sum)
-sd(tram20_PAR_sum$sum)
 
 tram20_PAR_sum %>% ggplot(aes(x = age/1000, y=sum)) +
   geom_col() +
@@ -574,7 +564,7 @@ tram20_PAR_groups_discussion <- tram20_PAR %>%
 tram20_PAR_groups_communities <- tram20_PAR %>%
   pivot_longer(cols = Abies:Undetermined, names_to = "Taxon", values_to = "PAR_value") %>% #long format
   left_join(pollen_group, by = "Taxon") %>% #Include pollen groups
-  group_by(depth, age, Community_2) %>%
+  dplyr::group_by(.data$Community_2, .data$depth, .data$age) %>%
   summarise(PAR_sum = sum(PAR_value, na.rm = TRUE)) %>% #calculate PAR sum for each group
   filter(Community_2 != "NA") %>% # exclude NAs
   pivot_wider(names_from = Community_2, values_from = PAR_sum, values_fill = 0) %>% #back to wide format
@@ -585,12 +575,6 @@ tram20_PAR_groups_communities <- tram20_PAR %>%
 
 ```{r}
 head(tram20_spores)
-
-#see some metrics
-summary(tram20_spores$total_spores)
-sd(tram20_spores$total_spores)
-summary(tram20_spores$Noftaxa)
-sd(tram20_spores$Noftaxa)
 ```
 
 ## 5.1. Compute Spore Accumulation Rate (SAR)
@@ -607,9 +591,6 @@ tram20_SAR <- tram20_spores %>%
   dplyr::select(c(depth, age, `PAR_Apiosordaria type`:`PAR_Facultative coprophilous`)) %>%
   rename_with(~ gsub("^PAR_", "", .x)) %>% #remove prefix
   mutate(total_SAR = rowSums(across(`Apiosordaria type`:Glomus)))
-
-summary(tram20_SAR$total_SAR)
-sd(tram20_SAR$total_SAR)
 ```
 
 Import spore groups

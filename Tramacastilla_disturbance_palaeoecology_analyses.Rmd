@@ -1,0 +1,892 @@
+---
+title: "Tramacastilla_disturbance_palaeoecology_analyses"
+author: "Irene Julián-Posada"
+date: "June 2026"
+output: pdf_document
+---
+
+This is the code used to perform statistical analyses included in Julián-Posada et al. (in prep).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+packages <- c("readr", "tidyverse", "patchwork", "ggrepel", #for data manipulation and visualisation
+              "strucchange", #breakpoint analysis
+              "vegan", #rarefaction and eveness
+              "Bchron", "RRatepol", #rate of change - RRatepol only works with R 4.2.0
+              "EnvCpt", "segmented", #changepoint analysis
+              "lavaan", "semPlot", "corrplot", #structural equation modelling
+              "TSA", #cross-correlations
+              "FactoMineR", "factoextra", "arm", "psych", #multivariate analyses and multiple factor analysis
+              "readxl", #read excel files
+              "nlme", #GLMs
+              "mgcv") #GAMs 
+lapply(packages, library, character.only = TRUE)
+
+load("tramacastilla_disturbance_palaeoecology.RData")
+```
+
+# 1. Richness with rarefaction
+## 1.1. Palynological richness with rarefaction
+Function rarefy gives the expected richness in random subsamples of size "sample" from the community.
+The size of "sample" should be smaller than total community size.
+If "sample" is a vector, rarefaction of all observations is performed for each sample size separately
+
+```{r}
+tram20_pollen_holocene_richness <- tram20_pollen_holocene %>%
+  dplyr::select(-c(SampleId, age, depth, `Terrestrial pollen sum`:Lycopodium, `Evergreen trees`:Trees, Shrubs, Herbs:`Charcoal <150`))
+
+S <- specnumber(tram20_pollen_holocene_richness) # observed number of species
+raremax <- min(rowSums(tram20_pollen_holocene_richness))
+Srare <- rarefy(tram20_pollen_holocene_richness, raremax)
+plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+
+rarecurve(tram20_pollen_holocene_richness, step = 20, sample = raremax, col = "blue", cex = 0.6)
+```
+
+Create dataframe with rarefaction richness as a variable
+```{r}
+tram20_pollen_holocene_rarefaction <- tram20_pollen_holocene %>%
+  cbind(Srare) %>% #add rarefaction as a new column
+  rename(Rarefaction = Srare) %>%
+  relocate(Rarefaction, .after = "No of taxa")
+```
+
+# 2. Evenness
+
+Create a function that allows for the estimation of different diversity indexes
+```{r}
+calculate_evenness <- function(abundances, method = "pielou") {
+  S <- specnumber(abundances)
+  if (method == "pielou") {
+    H <- diversity(abundances, "shannon")
+    J <- H / log(S)
+    return(J)
+  } else if (method == "simpson") {
+    lambda <- 1 - diversity(abundances, "simpson")
+    N2 <- 1 / lambda
+    E <- N2 / S
+    return(E)
+  }
+}
+```
+
+## 2.1. Palynological evenness
+Calculate Simpson index and plot
+```{r}
+evenness_simpson <- calculate_evenness(tram20_PAR %>%
+                     dplyr::select(-c(depth, age)), "simpson")
+
+tram_pollen_evenness_simpson <- data.frame(tram20_PAR %>% dplyr::select(age),
+                                           evenness_simpson)
+
+tram_pollen_evenness_simpson %>%
+  ggplot(aes(x = age/1000, y = evenness_simpson)) +
+  geom_line() +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_y_continuous(limits = c(0.1, 0.4),
+                     breaks = seq(0.1, 0.4, 0.2)) +
+  theme_classic() +
+  labs(x = "Age (ka BP)",
+       y = "Evenness") +
+  geom_point(data = RAI_animals_domestic %>%
+               mutate(presence = ifelse(Cattle|Sheep|Goat > 0.0, 0.35, 0)), # orange points when any domestic animal is identified
+             aes(x = age/1000, y = presence), color = "orange", size = 3) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        axis.text.x = element_text(size = 11),
+        axis.text.y = element_text(size = 11))
+```
+
+## 2.2. sedaDNA evenness ######
+Calculate Simpson index and plot
+```{r}
+evenness_simpson_RAI <- calculate_evenness(RAI_plants %>%
+                                         dplyr::select(-c(sample_id, depth, age)), "simpson")
+
+tram_RAI_evenness_simpson <- data.frame(RAI_plants %>% dplyr::select(age),
+                                        evenness_simpson_RAI)
+
+tram_RAI_evenness_simpson %>%
+  ggplot(aes(x = age/1000, y = evenness_simpson_RAI)) +
+  geom_line() +
+  scale_x_reverse(limits = c(12, 0.5),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  scale_y_continuous(limits = c(0.1, 0.4),
+                     breaks = seq(0.1, 0.4, 0.2)) +
+  theme_classic() +
+  labs(x = "Age (ka BP)",
+       y = "Evenness") +
+  geom_point(data = RAI_animals_domestic %>%
+               mutate(presence = ifelse(Cattle|Sheep|Goat > 0.0, 0.35, 0)), # orange points when any domestic animal is identified
+             aes(x = age/1000, y = presence), color = "orange", size = 3) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        axis.text.x = element_text(size = 11),
+        axis.text.y = element_text(size = 11))
+```
+
+# 3. Rate of Change
+
+## 3.1. Rate of Change of PAR
+
+### 3.1.1. Import data for Rate of Change
+
+```{r}
+tram20_RoC_PAR <- tram20_PAR %>%
+  left_join(tram20_depth_ages_sed_rate %>%
+              dplyr::select(SampleId, age), by = "age") %>%
+  relocate(SampleId, .before = depth) %>%
+  dplyr::select(-c(depth, age, Cyperaceae:Undetermined)) %>% #keep only terrestrial pollen types
+  rename("sample_id" = "SampleId")
+
+tram20_RoC_PAR %>%
+  mutate(sum = rowSums(across(where(is.numeric)))) %>%
+  dplyr::select(sample_id, sum) %>%
+  filter(sum == min(sum)) #307
+```
+
+### 3.1.2. BChron age depth model
+```{r}
+head(tram20_BChron_data)
+Tram20Chron = with(tram20_BChron_data, Bchronology(ages=ages,
+                                                   ageSds=ageSds, 
+                                                   calCurves=calCurves,
+                                                   positions=position, 
+                                                   positionThicknesses=thickness,
+                                                   ids=id, 
+                                                   predictPositions=seq(0,1500,by=10)))
+plot(Tram20Chron)
+```
+
+Age uncertainties from BChron age-depth model
+```{r}
+head(tram20_level) # file with sample_id and depths associated
+
+age_position <- Bchron:::predict.BchronologyRun(object = Tram20Chron, newPositions = tram20_level$depth)
+
+age_uncertainties <- age_position %>%  # assign ages to each depth
+  as.data.frame() %>%
+  mutate_all(., as.integer) %>%
+  as.matrix()
+colnames(age_uncertainties) <- tram20_level$sample_id
+```
+
+```{r}
+tram20_level_predicted <- tram20_level %>%
+  mutate(age = apply(age_uncertainties, 2, stats::quantile,  probs = 0.5))
+
+head(tram20_level_predicted)
+
+age.RoC.PAR <- tram20_depth_ages %>%
+  rename("age" = "median") %>%
+  dplyr::select(SampleId, age) %>%
+  mutate(age = as.numeric(age)) %>%
+  rename("sample_id" = "SampleId") %>%
+  filter(sample_id %in% tram20_RoC_PAR$sample_id)
+```
+
+### 3.1.3. Perform Rate of Change
+
+Scenario 4 - Estimating RoC for each level subsampling data and calculating age uncertainties
+```{r}
+set_randomisations <- 1000
+scenario_4_PAR <- RRatepol::estimate_roc(data_source_community = tram20_RoC_PAR,
+                                              data_source_age = age.RoC.PAR,
+                                              dissimilarity_coefficient = "chisq",
+                                              working_units = "levels",
+                                              time_standardisation = 500,
+                                              smooth_method = "shep",
+                                              standardise = TRUE,
+                                              n_individuals = 29, # set the number of PAR
+                                              rand = set_randomisations,
+                                              use_parallel = TRUE,
+                                              age_uncertainty = age_uncertainties) # Add the uncertainty matrix
+RRatepol::plot_roc(data_source = scenario_4_PAR)
+```
+
+Scenario 4b - Estimating RoC detecting peak points
+```{r}
+scenario_4_PAR_peak <- RRatepol::detect_peak_points(data_source = scenario_4_PAR,
+                                                         sel_method = "trend_non_linear")
+scenario_4_PAR_peak$Peak <- as.vector(scenario_4_PAR_peak$Peak)
+
+scenario_4_PAR_peak <- scenario_4_PAR_peak %>%
+  mutate(ROC_peak = case_when (Peak == "TRUE" ~ ROC,
+                               Peak == "FALSE" ~ NA))
+
+RRatepol::plot_roc(data_source = scenario_4_PAR_peak, peaks = TRUE)
+```
+
+Plot
+```{r}
+scenario_4_PAR_peak %>%
+  ggplot(aes(x = Age/1000))+
+  theme_classic() +
+  geom_ribbon(aes(ymin = ROC_dw, ymax = ROC_up), fill = "grey") +
+  geom_line(aes(y = ROC)) + 
+  geom_point(size = 3, aes(y = ROC_peak), shape = 21, fill = "green") +
+  scale_x_reverse(limits = c(max(CHAR$age)/1000, min(CHAR$age)/1000),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  xlab("Age (ka BP)") + 
+  ylab("Rate of Change (RoC) from PAR")
+```
+
+## 3.2. Rate of Change with SAR of coprophilous
+
+### 3.2.1. Import data for Rate of Change
+
+```{r}
+tram20_RoC_SAR <- tram20_SAR_coprophilous %>%
+  dplyr::select(-age) %>% #exclude age
+  left_join(tram20_level, by = "depth") %>%
+  dplyr::select(-depth) %>%
+  relocate(sample_id, .before = 0)
+
+tram20_RoC_SAR %>%
+  mutate(sum = rowSums(across(where(is.numeric)))) %>%
+  dplyr::select(sample_id, sum) %>%
+  filter(sum > 0) %>%
+  filter(sum == min(sum)) #2.57
+
+age.RoC.SAR <- age.RoC.PAR %>%
+  filter(age %in% tram20_SAR$age) %>%
+  dplyr::select(sample_id, age)
+
+age_uncertainties_SAR <- age_uncertainties %>%
+  as.data.frame() %>%
+  dplyr::select(any_of(age.RoC.SAR$sample_id)) %>%
+  as.matrix()
+```
+
+### 3.2.2. Perform Rate of Change
+
+Scenario 4 - Estimating RoC for each level subsampling data and calculating age uncertainties
+```{r}
+set_randomisations <- 1000
+scenario_4_SAR <- RRatepol::estimate_roc(data_source_community = tram20_RoC_SAR,
+                                         data_source_age = age.RoC.SAR,
+                                         dissimilarity_coefficient = "chisq",
+                                         working_units = "levels",
+                                         time_standardisation = 500,
+                                         smooth_method = "shep",
+                                         standardise = TRUE,
+                                         n_individuals = 3, # set the number of SAR
+                                         rand = set_randomisations,
+                                         use_parallel = TRUE,
+                                         age_uncertainty = age_uncertainties_SAR) # Add the uncertainty matrix
+RRatepol::plot_roc(data_source = scenario_4_SAR)
+```
+
+Scenario 4b - Estimating RoC detecting peak points
+```{r}
+# first, solve problems associated to the presence of 0 in the dataframe
+scenario_4_SAR_clean <- scenario_4_SAR %>%
+  mutate(across(where(is.numeric), ~ replace(., . == 0, 0.00001)))
+
+scenario_4_SAR_peak <- RRatepol::detect_peak_points(data_source = scenario_4_SAR_clean,
+                                                    sel_method = "trend_non_linear")
+
+scenario_4_SAR_peak$Peak <- as.vector(scenario_4_SAR_peak$Peak)
+
+scenario_4_SAR_peak <- scenario_4_SAR_peak %>%
+  mutate(ROC_peak = case_when (Peak == "TRUE" ~ ROC,
+                               Peak == "FALSE" ~ NA))
+
+RRatepol::plot_roc(data_source = scenario_4_SAR_peak, peaks = TRUE)
+```
+
+Plot
+```{r}
+scenario_4_SAR_peak %>%
+  ggplot(aes(x = Age/1000))+
+  theme_classic() +
+  geom_ribbon(aes(ymin = ROC_dw, ymax = ROC_up), fill = "grey") +
+  geom_line(aes(y = ROC)) + 
+  geom_point(size = 3, aes(y = ROC_peak), shape = 21, fill = "green") +
+  scale_x_reverse(limits = c(max(CHAR$age)/1000, min(CHAR$age)/1000),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), "")) +
+  xlab("Age (ka BP)") + 
+  ylab("Rate of Change (RoC) from SAR")
+```
+
+# 4. Changepoint analysis with CHAR data
+
+```{r}
+tram20_CHAR_cpt <- CHAR %>%
+  dplyr::select(age, CHAR.tram) %>%
+  arrange(age)
+
+out=envcpt(tram20_CHAR_cpt$CHAR.tram) # <- The key instruction!
+plot(out,type='fit') # plots the fits
+plot(out,type="aic") # plots the aic values
+plot(out,type="bic") # plots the bic values
+which.min(AIC(out)); which.min(BIC(out))
+
+model_CHAR <- envcpt(tram20_CHAR_cpt$CHAR.tram, models = "meanar2cpt") #here the chosen model
+summary(model_CHAR$meanar2cpt)
+plot(model_CHAR$meanar2cpt)
+```
+
+Assign ages to each changepoint and extract positions from changepoints
+```{r}
+cpts_CHAR <- cpts(model_CHAR$meanar2cpt) # rows where changepoints are
+print(cpts_CHAR)
+
+coef_ar_CHAR <- model_CHAR$meanar2cpt@param.est$ar
+
+changepoint_ages_CHAR <- tram20_CHAR_cpt$age[cpts_CHAR] # ages to each row: 1830 2003 6145
+```
+
+Plot
+```{r}
+tram20_CHAR_cpt %>%
+  ggplot(aes(x = age/1000, y = CHAR.tram)) +
+  geom_line() +
+  geom_vline(xintercept = changepoint_ages_CHAR/1000, color = "red", linetype = "dashed") +
+  labs(x = "Age (ka BP)", y = "CHAR (µm2·cm-2·yr-1)", title = "Changepoints using CHAR") +
+  theme_classic() +
+  scale_x_reverse(limits = c(max(CHAR$age)/1000, min(CHAR$age)/1000),
+                  breaks = seq(0.5, 12, by = 0.5),
+                  labels = ifelse(seq(0.5, 12, by = 0.5) %% 1 == 0, as.character(seq(0.5, 12, by = 0.5)), ""))
+```
+
+# 5. Cross-correlations for different periods: before and after 6.5 ka BP
+
+Import data
+```{r}
+char_full <- CHAR %>%
+  filter(age %in% tram20_pollen_holocene$age)
+```
+
+Create a function to perform cross-correlations for both periods
+```{r}
+tram_ccf <- function(data, taxa, char_full_data, period = "all", 
+                     age_threshold = 6500, lag_max = 5) {
+  
+  # Filter data based on period
+  filtered_data <- switch(period,
+                          "all" = data,
+                          "before" = data %>% filter(age > age_threshold),
+                          "after" = data %>% filter(age <= age_threshold))
+  
+  # Filter CHAR data to match the same period
+  char_filtered <- char_full_data %>%
+    filter(age %in% filtered_data$age) %>%
+    dplyr::select(CHAR.tram) %>%
+    pull()
+  
+  # Transform taxa data into temporal series
+  taxa_ts <- filtered_data %>%
+    dplyr::select({{taxa}}) %>%
+    pull()
+  
+  # Detrending lineal: adjust simple linear model and extract residuals
+  taxa_det <- resid(lm(taxa_ts ~ seq_along(taxa_ts)))
+  char_det <- resid(lm(char_filtered ~ seq_along(char_filtered)))
+  
+  # Cross-correlation
+  ccf_result <- ccf(taxa_det, char_det,
+                    lag.max = lag_max,
+                    plot = FALSE)
+  
+  ccf_df <- with(ccf_result, data.frame(lag, acf))
+  
+  n_obs <- length(taxa_det) # Significance
+  ci <- qnorm((1 + 0.95) / 2) / sqrt(n_obs)  # 95%
+  
+  # Plot title with period info
+  period_title <- switch(period,
+                         "all" = "All Period",
+                         "before" = paste("age >", age_threshold),
+                         "after" = paste("age =<", age_threshold))
+  
+  # Plot
+  if (period == "before") {
+    p <- ggplot(ccf_df, aes(x = lag, y = acf)) +
+      geom_bar(stat = "identity", width = 1,
+               colour = "#666666", fill = "grey") +
+      geom_hline(yintercept = c(-ci, ci),
+                 linetype = "dashed", color = "red") +
+      labs(y = paste(deparse(substitute(taxa))),
+           x = "Lags") +
+      theme_classic() +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "#666666") +
+      theme(axis.title.x = element_blank(),
+            axis.title.y = element_text(face = "italic", size = 12, angle = 0,vjust = 0.5),
+            axis.text.x = element_text(size = 11),
+            axis.text.y = element_text(size = 11))
+    
+  } else if (period == "after") {
+    p <- ggplot(ccf_df, aes(x = lag, y = acf)) +
+      geom_bar(stat = "identity", width = 1,
+               colour = "#666666", fill = "grey") +
+      geom_hline(yintercept = c(-ci, ci),
+                 linetype = "dashed", color = "red") +
+      theme_classic() +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "#666666") +
+      theme(axis.title.x = element_blank(),
+            axis.title.y = element_blank(),
+            axis.text.x = element_text(size = 11),
+            axis.text.y = element_text(size = 11))
+  }
+  
+  return(list(plot = p, ccf_df = ccf_df, ci = ci, n = n_obs, period = period))
+}
+```
+
+## 5.1. Cross-correlations for each taxa and periods
+
+Abies
+```{r}
+abies_ccf_before <- tram_ccf(tram20_PAR, Abies, char_full, period = "before")
+abies_ccf_after <- tram_ccf(tram20_PAR, Abies, char_full, period = "after")
+```
+
+Pinus
+```{r}
+pinus_ccf_before <- tram_ccf(tram20_PAR, Pinus, char_full, period = "before")
+pinus_ccf_after <- tram_ccf(tram20_PAR, Pinus, char_full, period = "after")
+```
+
+Fagus
+```{r}
+fagus_ccf_before <- tram_ccf(tram20_PAR, Fagus, char_full, period = "before")
+fagus_ccf_after <- tram_ccf(tram20_PAR, Fagus, char_full, period = "after")
+```
+
+Betula
+```{r}
+betula_ccf_before <- tram_ccf(tram20_PAR, Betula, char_full, period = "before")
+betula_ccf_after <- tram_ccf(tram20_PAR, Betula, char_full, period = "after")
+```
+
+Corylus
+```{r}
+corylus_ccf_before <- tram_ccf(tram20_PAR, Corylus, char_full, period = "before")
+corylus_ccf_after <- tram_ccf(tram20_PAR, Corylus, char_full, period = "after")
+```
+
+Deciduous Quercus
+```{r}
+decquercus_ccf_before <- tram_ccf(tram20_PAR %>%
+                                    rename("Dec. Quercus" = "Deciduous Quercus"),
+                                  `Dec. Quercus`, char_full, period = "before")
+decquercus_ccf_after <- tram_ccf(tram20_PAR %>%
+                                   rename("Dec. Quercus" = "Deciduous Quercus"),
+                                 `Dec. Quercus`, char_full, period = "after")
+```
+
+Poaceae
+```{r}
+poaceae_ccf_before <- tram_ccf(tram20_PAR, Poaceae, char_full, period = "before")
+poaceae_ccf_after <- tram_ccf(tram20_PAR, Poaceae, char_full, period = "after")
+```
+
+Palynological richness
+```{r}
+richness_ccf_before <- tram_ccf(tram20_pollen_holocene_rarefaction %>%
+                                  rename("Richness" = "Rarefaction"),
+                                Richness, char_full, period = "before")
+richness_ccf_after <- tram_ccf(tram20_pollen_holocene_rarefaction %>%
+                                 rename("Richness" = "Rarefaction"),
+                               Richness, char_full, period = "after")
+```
+
+Palynological evenness
+```{r}
+evenness_ccf_before <- tram_ccf(tram_pollen_evenness_simpson%>%
+                                  rename("Evenness" = "evenness_simpson"),
+                                Evenness, char_full, period = "before")
+evenness_ccf_after <- tram_ccf(tram_pollen_evenness_simpson%>%
+                                 rename("Evenness" = "evenness_simpson"),
+                               Evenness, char_full, period = "after")
+```
+
+## 5.2. Create plots of cross-correlations
+
+```{r}
+p.abies.ccf_before <- abies_ccf_before$plot
+p.abies.ccf_after <- abies_ccf_after$plot
+
+p.pinus.ccf_before <- pinus_ccf_before$plot
+p.pinus.ccf_after <- pinus_ccf_after$plot
+
+p.fagus.ccf_before <- fagus_ccf_before$plot
+p.fagus.ccf_after <- fagus_ccf_after$plot
+
+p.betula.ccf_before <- betula_ccf_before$plot
+p.betula.ccf_after <- betula_ccf_after$plot
+
+p.corylus.ccf_before <- corylus_ccf_before$plot
+p.corylus.ccf_after <- corylus_ccf_after$plot
+
+p.decquercus.ccf_before <- decquercus_ccf_before$plot
+p.decquercus.ccf_after <- decquercus_ccf_after$plot
+
+p.poaceae.ccf_before <- poaceae_ccf_before$plot
+p.poaceae.ccf_after <- poaceae_ccf_after$plot
+
+p.richness.ccf_before <- richness_ccf_before$plot
+p.richness.ccf_after <- richness_ccf_after$plot
+
+p.evenness.ccf_before <- evenness_ccf_before$plot
+p.evenness.ccf_after <- evenness_ccf_after$plot
+```
+
+# 6. Structural Equation Modelling (SEM)
+
+Prepare all data
+```{r}
+RAI_plants_richness <- RAI_plants %>%
+  mutate(richness = rowSums(across(c(`Abies alba`:Ziziphora), ~ .x > 0), na.rm = TRUE))
+
+RAI_plants_richness_binned <- RAI_plants_richness %>%
+  mutate(binned_age = sapply(age, function(x) bins_pollen[which.min(abs(bins_pollen-x))])) %>%
+  mutate(RAI_Fagus = Fagus + `Fagus sylvatica`) %>%
+  group_by(binned_age) %>%
+  summarise(richness = mean(richness, na.rm = TRUE),
+            RAI_Fagus = mean(RAI_Fagus, na.rm = TRUE)) %>%
+  rename("age" = "binned_age",
+         "plant_richness_dna" = "richness") %>%
+  ungroup()
+
+head(RAI_plants_groups)
+
+RAI_plants_groups_binned <- RAI_plants_groups %>%
+  mutate(binned_age = sapply(age, function(x) bins_pollen[which.min(abs(bins_pollen-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(across(c(`Abies alba`, `Open landscape`, `Novel herbaceous taxa`),
+                   ~ mean(., na.rm = TRUE))) %>%
+  rename("age" = "binned_age",
+         "RAI_Abies" = "Abies alba",
+         "RAI_Open" = "Open landscape",
+         "RAI_Novel" = "Novel herbaceous taxa") %>%
+  ungroup()
+
+tram_RAI_evenness_simpson_binned <- tram_RAI_evenness_simpson %>%
+  mutate(binned_age = sapply(age, function(x) bins_pollen[which.min(abs(bins_pollen-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(evenness_simpson_RAI  = mean(evenness_simpson_RAI, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup()
+
+head(Mendukilo)
+
+Mendukilo_binned <- Mendukilo %>%
+  mutate(binned_age = sapply(age, function(x) bins_pollen[which.min(abs(bins_pollen-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(d13C.Mendukilo = mean(d13C.Mendukilo, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+```
+
+All data in one dataframe
+```{r}
+data_SEM <- RAI_animals_domestic_binned %>%
+  left_join(RAI_plants_richness_binned, by = "age") %>%
+  left_join(CHAR %>%
+              dplyr::select(CHAR.tram, age), by = "age") %>%
+  left_join(tram_pollen_evenness_simpson, by = "age") %>%
+  left_join(tram_RAI_evenness_simpson_binned, by = "age") %>%
+  left_join(tram20_SAR %>%
+              dplyr::select(age, `Facultative coprophilous`, `Obligate coprophilous`), by = "age") %>%
+  rename("fac_coprophilous" = "Facultative coprophilous",
+         "ob_coprophilous" = "Obligate coprophilous") %>%
+  left_join(Mendukilo_binned, by = "age") %>%
+  left_join(RAI_plants_groups_binned, by = "age") %>%
+  left_join(tram20_PAR %>%
+              dplyr::select(age, Abies, Fagus, Poaceae) %>%
+              rename("PAR_Abies" = "Abies",
+                     "PAR_Fagus" = "Fagus",
+                     "PAR_Poaceae" = "Poaceae"), by = "age")
+```
+
+Transform variables as PAR and RAI have many 0s, and SEM assumes multivariate normality, so log-transformations improve normality, lineality and homocedasticity
+```{r}
+data_transformed <- data_SEM %>%
+  mutate(log_RAI_Abies = log10(RAI_Abies + 1e-7), # add small values for 0
+         log_RAI_Fagus = log10(RAI_Fagus + 1e-7),
+         log_RAI_Open = log10(RAI_Open + 1e-7),
+         log_RAI_Novel = log10(RAI_Novel + 1e-7),
+         log_PAR_Abies = log10(PAR_Abies + 1),
+         log_PAR_Fagus = log10(PAR_Fagus + 1),
+         log_PAR_Poaceae = log10(PAR_Poaceae + 1),
+         log_CHAR = log10(CHAR.tram + 1),
+         log_copro = log10(ob_coprophilous + 1),
+         # standardise (optional, helps interpretation)
+         z_d13C = as.numeric(scale(d13C.Mendukilo)),
+         z_Cattle = as.numeric(scale(Cattle)),
+         z_Sheep = as.numeric(scale(Sheep)),
+         z_Goat = as.numeric(scale(Goat)),
+         z_richness_RAI = as.numeric(scale(plant_richness_dna)),
+         z_evenness_polen = as.numeric(scale(evenness_simpson)),
+         z_evenness_RAI = as.numeric(scale(evenness_simpson_RAI)))
+```
+
+Explore correlations between variables
+```{r}
+vars_cor <- data_transformed %>% 
+  dplyr::select(log_RAI_Fagus, log_RAI_Abies, Cattle, Sheep, Goat, 
+                log_copro, log_CHAR, z_d13C, log_RAI_Open)
+
+cor_matrix <- cor(vars_cor, use = "complete.obs")
+corrplot::corrplot(cor_matrix, method = "color", 
+                   type = "upper", tl.col = "black")
+```
+
+## 6.1. Prepare data for communities
+```{r}
+data_SEM_communities <- data_transformed %>%
+  dplyr::select(age, z_Cattle, z_Sheep, z_Goat, log_CHAR, z_richness_RAI, z_evenness_polen,
+                z_evenness_RAI, log_copro, z_d13C) %>%
+  left_join(tram20_PAR_groups_communities %>%
+              rename_with(~ gsub("^", "PAR_", .x), .cols = Abies_Fagus:`temperate forest`),
+            by = "age") %>%
+  mutate(log_PAR_Abies_Fagus = log10(PAR_Abies_Fagus + 1), # add small values for 0
+         log_PAR_grassland = log10(PAR_grassland + 1),
+         log_PAR_mediterranean = log10(PAR_mediterranean + 1),
+         log_PAR_pinewoods  = log10(PAR_pinewoods + 1),
+         log_PAR_riverine = log10(`PAR_riverine community` + 1),
+         log_PAR_rocky = log10(`PAR_rocky community` + 1),
+         log_PAR_shrubland  = log10(PAR_shrubland  + 1),
+         log_PAR_temperate = log10(`PAR_temperate forest` + 1),
+         log_PAR_pastureland = log10(PAR_pastureland + 1))
+```
+
+Explore correlations between variables
+```{r}
+cor_matrix_communities <- cor(data_SEM_communities %>% dplyr::select(-age, -depth), use = "complete.obs")
+corrplot::corrplot(cor_matrix_communities, method = "color", 
+                   type = "upper", tl.col = "black")
+```
+
+## 6.2. Model with selected variables
+
+```{r echo=T, results='hide'}
+tram_SEM_PAR_communities_selected <-  '# Latent variables
+    Herbivory =~ NA*z_Cattle + z_Sheep + log_copro
+    Herbivory ~~ 1*Herbivory
+    
+    # Structural regressions
+    # Effects of temperature (d13C) on disturbances
+    Herbivory ~ z_d13C
+    
+    # Effects of disturbances on communities
+    log_PAR_Abies_Fagus ~ Herbivory
+    log_PAR_grassland ~ log_CHAR + z_d13C
+    log_PAR_pinewoods ~ log_CHAR
+    log_PAR_temperate ~ log_CHAR + Herbivory
+    log_PAR_mediterranean ~ z_d13C
+    
+    #Effects of disturbances on heterogeneity
+    z_evenness_polen ~ Herbivory + log_CHAR
+    
+    # Residual covariance between disturbances
+    Herbivory ~~ log_CHAR
+'
+fit_no_normal_8 <- cfa(tram_SEM_PAR_communities_selected, data = data_SEM_communities, test = "bootstrap", verbose = TRUE, bootstrap = 1000)
+summary(fit_no_normal_8, standardized = TRUE, fit.measures = TRUE, rsquare = TRUE)
+fitMeasures(fit_no_normal_8, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+```
+
+See standardised effects (comparable)
+```{r}
+parameters_signif_nonormal8 <- parameterEstimates(fit_no_normal_8, standardized = TRUE) %>%
+  filter(op == "~") %>%
+  mutate(variable = paste(lhs, "←", rhs),
+         dir = ifelse(std.all > 0, "positive", "negative")) %>%
+  dplyr::select(variable, est, std.all, dir, pvalue) %>%
+  arrange(desc(abs(std.all)))
+```
+
+Figure of standardised coefficients
+```{r}
+parameters_signif_nonormal8 %>%
+  filter(pvalue < 0.05) %>%
+  ggplot(aes(x = reorder(variable, std.all), y = std.all)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(x = "Relation", y = "Standardised coefficient",
+       title = "Significative effects on SEM") +
+  theme_minimal()
+```
+
+Interpretation:
+Adequacy of the model -> NEARLY ADECUATE
+   p-value = 0.463
+   CFI = 1
+   robust RMSEA = 0.002
+   SRMS = 0.077
+Significative effects on Abies_Fagus community:
+   Herbivory (+)
+Significative effects on herbivory:
+   temperature (+)
+Significative effects on grasslands:
+   temperature (+)
+   fire (+)
+Significative effects on pinewoods:
+   fire (+)
+Significative effects on temperate forest:
+   herbivory (-)
+Significative effects on pollen evenness:
+   herbivory (+)
+   fire (-)
+
+# 7. GAMs -- Turnover vegetation drivers
+
+## 7.1 Prepare data with all variables
+
+```{r}
+bins_drivers <- scenario_4_RAI_peak$Age
+
+Mendukilo_binned_drivers <- Mendukilo %>%
+  mutate(binned_age = sapply(age, function(x) bins_drivers[which.min(abs(bins_drivers-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(d13C.Mendukilo = mean(d13C.Mendukilo, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+
+CHAR_binned_drivers <- CHAR %>%
+  mutate(binned_age = sapply(age, function(x) bins_drivers[which.min(abs(bins_drivers-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(CHAR.tram = mean(CHAR.tram, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+
+RAI_animals_domestic_binned_drivers <- RAI_animals_domestic %>%
+  mutate(binned_age = sapply(age, function(x) bins_drivers[which.min(abs(bins_drivers-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(Cattle = mean(Cattle, na.rm = TRUE),
+            Sheep = mean(Sheep, na.rm = TRUE),
+            Goat = mean(Goat, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+
+tram20_copro_binned_drivers <- tram20_SAR %>%
+  dplyr::select(age, `Facultative coprophilous`, `Obligate coprophilous`) %>%
+  rename("fac_coprophilous" = "Facultative coprophilous",
+         "ob_coprophilous" = "Obligate coprophilous") %>%
+  mutate(binned_age = sapply(age, function(x) bins_drivers[which.min(abs(bins_drivers-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(fac_coprophilous = mean(fac_coprophilous, na.rm = TRUE),
+            ob_coprophilous = mean(ob_coprophilous, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+
+tram20_PAR_sum_binned_drivers <-tram20_PAR_sum %>%
+  dplyr::select(age, sum) %>%
+  mutate(binned_age = sapply(age, function(x) bins_drivers[which.min(abs(bins_drivers-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(PAR_sum = mean(sum, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+
+scenario_4_PAR_peak_binned <- scenario_4_PAR_peak %>%
+  dplyr::select(Age, ROC) %>%
+  rename("age" = "Age") %>%
+  mutate(binned_age = sapply(age, function(x) bins_drivers[which.min(abs(bins_drivers-x))])) %>%
+  group_by(binned_age) %>%
+  summarise(ROC = mean(ROC, na.rm = TRUE)) %>%
+  rename("age" = "binned_age") %>%
+  ungroup() %>%
+  as.data.frame()
+
+data_drivers_turnover <- scenario_4_RAI_peak %>%
+  dplyr::select(Age, ROC) %>%
+  rename("age" = "Age",
+         "ROC_RAI" = "ROC") %>%
+  left_join(scenario_4_PAR_peak_binned %>%
+              rename("ROC_PAR" = "ROC"), by = "age") %>%
+  left_join(Mendukilo_binned_drivers, by = "age") %>%
+  left_join(CHAR_binned_drivers, by = "age") %>%
+  left_join(RAI_animals_domestic_binned_drivers, by = "age") %>%
+  left_join(tram20_copro_binned_drivers, by = "age") %>%
+  left_join(tram20_PAR_sum_binned_drivers, by = "age")
+
+data_drivers_turnover_transformed <- data_drivers_turnover %>%
+  mutate(z_ROC_RAI = as.numeric(scale(ROC_RAI)),
+         z_ROC_PAR = as.numeric(scale(ROC_PAR)),
+         z_d13C = as.numeric(scale(d13C.Mendukilo)),
+         z_Cattle = as.numeric(scale(Cattle)),
+         z_Sheep = as.numeric(scale(Sheep)),
+         z_Goat = as.numeric(scale(Goat)),
+         z_CHAR = as.numeric(CHAR.tram),
+         log_ob_copro = log10(ob_coprophilous + 1),
+         log_fac_copro = log10(fac_coprophilous + 1),
+         log_PAR = log10(PAR_sum + 1)) %>%
+  drop_na()
+```
+
+## 7.2. Individual GAMs
+
+See the effect of temperature on Rate of Change of sedaDNA
+```{r}
+gam_drivers_1 <- gam(z_ROC_RAI ~ z_d13C, data = data_drivers_turnover_transformed)
+summary_gam1 <- summary(gam_drivers_1) #R2 = 41% and significative
+```
+
+See the effect of temperature on Rate of Change of pollen
+```{r}
+gam_drivers_1_PAR <- gam(z_ROC_PAR ~ z_d13C, data = data_drivers_turnover_transformed)
+summary_gam1_PAR <- summary(gam_drivers_1_PAR) #R2 = 45% and significative
+```
+
+See the effect of herbivory (cattle) on Rate of Change of sedaDNA
+```{r}
+gam_drivers_2 <- gam(z_ROC_RAI ~ z_Cattle, data = data_drivers_turnover_transformed)
+summary_gam2 <- summary(gam_drivers_2) #R2 = 25% and significative
+```
+
+See the effect of herbivory (cattle) on Rate of Change of pollen
+```{r}
+gam_drivers_2_PAR <- gam(z_ROC_PAR ~ z_Cattle, data = data_drivers_turnover_transformed)
+summary_gam2_PAR <- summary(gam_drivers_2_PAR) #R2 = 33% and significative
+```
+
+See the effect of herbivory (Sheep) on Rate of Change of sedaDNA
+```{r}
+gam_drivers_3 <- gam(z_ROC_RAI ~ z_Sheep, data = data_drivers_turnover_transformed)
+summary_gam3 <- summary(gam_drivers_3) #R2 = 1% and not significative
+```
+
+See the effect of herbivory (Sheep) on Rate of Change of pollen
+```{r}
+gam_drivers_3_PAR <- gam(z_ROC_PAR ~ z_Sheep, data = data_drivers_turnover_transformed)
+summary_gam3_PAR <- summary(gam_drivers_3_PAR) #R2 = 1% and not significative
+```
+
+See the effect of herbivory (coprophilous fungi) on Rate of Change of sedaDNA
+```{r}
+gam_drivers_4 <- gam(z_ROC_RAI ~ log_ob_copro, data = data_drivers_turnover_transformed)
+summary_gam4 <- summary(gam_drivers_4) #R2 = 47% and significative
+```
+
+See the effect of herbivory (coprophilous fungi) on Rate of Change of pollen
+```{r}
+gam_drivers_4_PAR <- gam(z_ROC_PAR ~ log_ob_copro, data = data_drivers_turnover_transformed)
+summary_gam4_PAR <- summary(gam_drivers_4_PAR) #R2 = 25% and significative
+```
+
+See the effect of fire on Rate of Change of sedaDNA
+```{r}
+gam_drivers_5 <- gam(z_ROC_RAI ~ z_CHAR, data = data_drivers_turnover_transformed)
+summary_gam5 <- summary(gam_drivers_5) #R2 = 0.05% and not significative
+```
+
+See the effect of fire on Rate of Change of pollen
+```{r}
+gam_drivers_5_PAR <- gam(z_ROC_PAR ~ z_CHAR, data = data_drivers_turnover_transformed)
+summary_gam5_PAR <- summary(gam_drivers_5_PAR) #R2 = 0.2% and not significative
+```
